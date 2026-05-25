@@ -1,0 +1,112 @@
+# .github/workflows/daily-build.yml
+
+name: TenorShare Daily Revenue Engine
+
+on:
+  workflow_dispatch:
+
+  schedule:
+    # Runs daily at 9:00 UTC
+    - cron: "0 9 * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: tenorshare-daily-engine
+  cancel-in-progress: false
+
+jobs:
+  build-site:
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Verify Repository Files
+        run: |
+          ls -la
+
+      - name: Configure Git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Sync Latest Remote
+        run: |
+          git fetch origin main
+          git checkout main
+          git reset --hard origin/main
+
+      - name: Run Revenue Build Engine
+        run: |
+          if [ -f build.py ]; then
+            python build.py
+          else
+            echo "ERROR: build.py missing"
+            exit 1
+          fi
+
+      - name: Verify Generated Files
+        run: |
+          ls -la
+
+          if [ ! -f index.html ]; then
+            echo "ERROR: index.html was not generated"
+            exit 1
+          fi
+
+      - name: Commit Generated Changes
+        shell: bash
+        run: |
+          git add .
+
+          if git diff --cached --quiet; then
+            echo "No changes detected."
+            exit 0
+          fi
+
+          git commit -m "Daily TenorShare revenue update"
+
+      - name: Safe Push Retry Loop
+        shell: bash
+        run: |
+          for i in 1 2 3 4 5; do
+
+            echo "Push attempt $i"
+
+            git fetch origin main
+
+            git rebase origin/main || {
+              echo "Rebase conflict detected"
+              git rebase --abort || true
+              sleep 5
+              continue
+            }
+
+            if git push origin main; then
+              echo "Push successful"
+              exit 0
+            fi
+
+            echo "Push failed. Retrying..."
+            sleep 5
+
+          done
+
+          echo "Push failed after multiple attempts"
+          exit 1
+
+      - name: Workflow Complete
+        run: |
+          echo "TenorShare Daily Revenue Engine completed successfully"
